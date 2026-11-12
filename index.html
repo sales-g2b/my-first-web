@@ -5564,9 +5564,18 @@
       const expectedCode = computeApprovalCodeForEmail(em);
       const existingAcc = approvedAccountsMap[em];
       const rosterApproved = authConfig.userList.find(u => u.email === em && u.status === 'APPROVED');
+      const rosterPending = authConfig.userList.find(u => u.email === em && u.status === 'PENDING');
+
+      if (rosterPending && !rosterApproved && codeRaw.toUpperCase() !== expectedCode) {
+        msgEl.className = 'text-[11px] text-center font-bold text-amber-300';
+        msgEl.textContent = '⏳ 현재 [승인 대기중]인 계정입니다. 관리자가 [메일 승인 · 차단 관리]에서 승인하면 바로 로그인됩니다.';
+        return;
+      }
 
       // 2. If already approved once (in approvedAccountsMap or rosterApproved), allow login with personal password OR approval code without re-approval!
-      const isPasswordMatch = existingAcc && existingAcc.password && (codeRaw === existingAcc.password);
+      const isPasswordMatch = (existingAcc && existingAcc.password && (codeRaw === existingAcc.password)) ||
+                              (rosterApproved && rosterApproved.password && (codeRaw === rosterApproved.password)) ||
+                              (rosterApproved && localStorage.getItem('RS_PENDING_PW_' + em) && (codeRaw === localStorage.getItem('RS_PENDING_PW_' + em)));
       const isCodeMatch = (codeRaw.toUpperCase() === expectedCode);
 
       if (isPasswordMatch || isCodeMatch || (rosterApproved && isCodeMatch)) {
@@ -5633,27 +5642,36 @@
 
       const rosterRowsHtml = authConfig.userList.length > 0 ? authConfig.userList.map((u, idx) => {
         const isRevoked = u.status === 'REVOKED' || authConfig.revokedEmails.includes(u.email);
+        const isPending = !isRevoked && u.status === 'PENDING';
+        const rowBg = isRevoked ? 'bg-rose-50/60' : (isPending ? 'bg-amber-50/80' : '');
+        const badgeCls = isRevoked ? 'bg-rose-100 text-rose-800' : (isPending ? 'bg-amber-200 text-amber-950 animate-pulse' : 'bg-emerald-100 text-emerald-800');
+        const badgeTxt = isRevoked ? '⛔ 권한해제(차단됨)' : (isPending ? '🟡 승인대기중 (신청)' : '✅ 승인완료 (사용중)');
         return `
-          <tr class="hover:bg-slate-50 ${isRevoked ? 'bg-rose-50/60' : ''}">
+          <tr class="hover:bg-slate-50 ${rowBg}">
             <td class="p-2 text-center font-mono text-slate-400">${idx + 1}</td>
             <td class="p-2">
-              <div class="font-bold ${isRevoked ? 'line-through text-rose-700' : 'text-slate-900'}">${u.email}</div>
-              <div class="text-[10px] text-slate-500">${u.name || '-'} · ${u.date || ''}</div>
+              <div class="font-bold ${isRevoked ? 'line-through text-rose-700' : 'text-slate-900'}">${u.name || '임직원'} <span class="font-mono text-indigo-700">(${u.email})</span></div>
+              <div class="text-[10px] text-slate-500">신청/등록일: ${u.date || '-'} ${u.password ? `· 설정비번: <span class="font-mono font-bold text-slate-700">${u.password}</span>` : ''}</div>
             </td>
             <td class="p-2 text-center font-mono font-black text-indigo-700">${u.code}</td>
             <td class="p-2 text-center">
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${isRevoked ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}">
-                ${isRevoked ? '⛔ 권한해제(차단됨)' : '✅ 사용승인중'}
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${badgeCls}">
+                ${badgeTxt}
               </span>
             </td>
-            <td class="p-2 text-right space-x-1">
-              ${!isRevoked ? `
-                <button onclick="sendSingleUserApprovalMail('${u.email}', '${u.code}')" class="px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold text-[10px]">✉️ 승인메일발송</button>
-                <button onclick="revokeUserAccess('${u.email}')" class="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[10px] shadow-xs transition">🚫 즉시 권한해제(차단)</button>
-              ` : `
-                <button onclick="restoreUserAccess('${u.email}')" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px]">🔄 차단 해제(재승인)</button>
+            <td class="p-2 text-right space-x-1 whitespace-nowrap">
+              ${isPending ? `
+                <button onclick="approvePendingUser('${u.email}')" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] shadow-xs transition">✅ 즉시 승인하기</button>
+                <button onclick="revokeUserAccess('${u.email}')" class="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px]">🚫 거절/차단</button>
                 <button onclick="deleteUserFromRoster('${u.email}')" class="px-2 py-1 rounded bg-slate-200 text-slate-700 hover:bg-slate-300 font-bold text-[10px]">삭제</button>
-              `}
+              ` : (!isRevoked ? `
+                <button onclick="copyApprovedUserNotice('${u.email}')" class="px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold text-[10px]">💬 승인안내복사</button>
+                <button onclick="setUserToPending('${u.email}')" class="px-2 py-1 rounded bg-amber-100 text-amber-800 hover:bg-amber-200 font-bold text-[10px]">⏸️ 대기전환</button>
+                <button onclick="revokeUserAccess('${u.email}')" class="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[10px] shadow-xs transition">🚫 즉시 차단</button>
+              ` : `
+                <button onclick="approvePendingUser('${u.email}')" class="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px]">🔄 재승인</button>
+                <button onclick="deleteUserFromRoster('${u.email}')" class="px-2 py-1 rounded bg-slate-200 text-slate-700 hover:bg-slate-300 font-bold text-[10px]">삭제</button>
+              `)}
             </td>
           </tr>
         `;
@@ -7039,7 +7057,300 @@ function updateDataRefDateBadge(dateStr) {
   if (el) el.textContent = d;
 }
 
-// --- Item 6: Simple Name + Email -> Admin Approval List ---
+// --- Item 6: Cross-Device Cloud Sync + Interactive Admin Pending Approval Center ---
+var DEFAULT_SHARED_CLOUD_KEY = 'rstone_g2b_roster_2026_v7';
+
+async function pushRosterToSharedCloud() {
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    userList: authConfig.userList || [],
+    revokedEmails: authConfig.revokedEmails || []
+  };
+  // 1. Try custom cloudRosterUrl if configured
+  if (authConfig.cloudRosterUrl && authConfig.cloudRosterUrl.startsWith('http')) {
+    try {
+      await fetch(authConfig.cloudRosterUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch(e) {}
+  }
+  // 2. Try GitHub repo rstone_auth_roster.json if GitHub token & repo are saved in localStorage
+  try {
+    const ghOwner = safeGetLS('RS_GH_OWNER', '');
+    const ghRepo = safeGetLS('RS_GH_REPO', '');
+    const ghToken = safeGetLS('RS_GH_TOKEN', '');
+    if (ghOwner && ghRepo && ghToken) {
+      const apiUrl = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/rstone_auth_roster.json`;
+      let sha = undefined;
+      const getRes = await fetch(apiUrl, { headers: { 'Authorization': `token ${ghToken}` } });
+      if (getRes.ok) {
+        const getJson = await getRes.json();
+        sha = getJson.sha;
+      }
+      const b64Content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
+      await fetch(apiUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${ghToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `Update auth roster (${new Date().toISOString().slice(0,16)})`,
+          content: b64Content,
+          ...(sha ? { sha } : {})
+        })
+      });
+    }
+  } catch(e) {}
+}
+
+async function pullRosterFromSharedCloud(silent = true) {
+  let mergedCount = 0;
+  const mergeIncomingList = (incomingList, incomingRevoked) => {
+    if (Array.isArray(incomingRevoked)) {
+      incomingRevoked.forEach(em => {
+        if (em && !authConfig.revokedEmails.includes(em)) authConfig.revokedEmails.push(em);
+      });
+    }
+    if (Array.isArray(incomingList)) {
+      incomingList.forEach(inc => {
+        if (!inc || !inc.email) return;
+        const cleanEm = String(inc.email).trim().toLowerCase();
+        const existing = authConfig.userList.find(u => u.email === cleanEm);
+        if (!existing) {
+          authConfig.userList.unshift({
+            email: cleanEm,
+            name: inc.name || '신청임직원',
+            password: inc.password || '',
+            code: inc.code || computeApprovalCodeForEmail(cleanEm),
+            status: inc.status || 'PENDING',
+            date: inc.date || new Date().toLocaleDateString('ko-KR')
+          });
+          mergedCount++;
+        } else {
+          // If incoming has APPROVED and local was PENDING, upgrade to APPROVED
+          if (existing.status === 'PENDING' && inc.status === 'APPROVED') {
+            existing.status = 'APPROVED';
+            mergedCount++;
+          }
+          if (inc.password && !existing.password) existing.password = inc.password;
+          if (inc.name && (!existing.name || existing.name === '임직원')) existing.name = inc.name;
+        }
+        if (inc.status === 'APPROVED') {
+          approvedAccountsMap[cleanEm] = {
+            email: cleanEm,
+            name: inc.name || '임직원',
+            password: inc.password || inc.code || computeApprovalCodeForEmail(cleanEm),
+            code: inc.code || computeApprovalCodeForEmail(cleanEm),
+            approvedAt: inc.date || new Date().toLocaleDateString('ko-KR'),
+            masterPinAtApproval: authConfig.masterPin
+          };
+        }
+      });
+    }
+  };
+
+  // 1. Check same-origin ./rstone_auth_roster.json (when hosted on GitHub Pages / Vercel)
+  try {
+    const rosterFile = ['rstone_auth', '_roster.json'].join(''); const res = window.location.protocol.startsWith('http') ? await fetch(rosterFile + '?t=' + Date.now(), { cache: 'no-store' }) : { ok: false };
+    if (res.ok) {
+      const data = await res.json();
+      mergeIncomingList(data.userList, data.revokedEmails);
+    }
+  } catch(e) {}
+
+  // 2. Check custom cloudRosterUrl if configured
+  if (authConfig.cloudRosterUrl && authConfig.cloudRosterUrl.startsWith('http')) {
+    try {
+      const res2 = await fetch(authConfig.cloudRosterUrl + (authConfig.cloudRosterUrl.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+      if (res2.ok) {
+        const data2 = await res2.json();
+        mergeIncomingList(data2.userList || data2, data2.revokedEmails);
+      }
+    } catch(e) {}
+  }
+
+  // 3. Check GitHub API directly if token is configured
+  try {
+    const ghOwner = safeGetLS('RS_GH_OWNER', '');
+    const ghRepo = safeGetLS('RS_GH_REPO', '');
+    const ghToken = safeGetLS('RS_GH_TOKEN', '');
+    if (ghOwner && ghRepo && ghToken) {
+      const apiUrl = `https://api.github.com/repos/${ghOwner}/${ghRepo}/contents/rstone_auth_roster.json?t=${Date.now()}`;
+      const ghRes = await fetch(apiUrl, { headers: { 'Authorization': `token ${ghToken}` }, cache: 'no-store' });
+      if (ghRes.ok) {
+        const ghJson = await ghRes.json();
+        if (ghJson.content) {
+          const decoded = decodeURIComponent(escape(atob(ghJson.content.replace(/\s/g, ''))));
+          const parsed = JSON.parse(decoded);
+          mergeIncomingList(parsed.userList, parsed.revokedEmails);
+        }
+      }
+    }
+  } catch(e) {}
+
+  saveAuthConfigToStorage();
+  saveApprovedAccountsMap();
+  if (!silent) {
+    showKakaoToast(mergedCount > 0 ? `🔄 신규 신청/변경 내역 ${mergedCount}건을 불러왔습니다!` : `✅ 최신 승인 대기 명단 상태입니다.`);
+    openAuthAndApkModal('AUTH');
+  }
+}
+
+function makeApplicantRequestToken(u) {
+  try {
+    const obj = { n: u.name, e: u.email, p: u.password || '', d: u.date || '' };
+    return 'RSREQ-' + btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+  } catch(e) {
+    return '';
+  }
+}
+
+function importApplicantRequestToken() {
+  const inp = document.getElementById('pendingTokenPasteInput');
+  const raw = (inp ? inp.value : '').trim();
+  if (!raw) {
+    showKakaoToast('⚠️ 일반 유저에게 전달받은 신청코드(또는 이름/이메일)를 붙여넣어 주세요.');
+    return;
+  }
+  try {
+    const tokenPart = raw.includes('RSREQ-') ? raw.split('RSREQ-')[1].trim().split(/\s/)[0] : raw;
+    const jsonStr = decodeURIComponent(escape(atob(tokenPart)));
+    const obj = JSON.parse(jsonStr);
+    if (obj && obj.e) {
+      addOrUpdateApplicantInRoster(obj.n || '신청자', obj.e, obj.p || '1234', 'PENDING');
+      if (inp) inp.value = '';
+      showKakaoToast(`✅ [${obj.n} / ${obj.e}] 승인 대기 목록에 추가되었습니다! [즉시 승인]을 눌러주세요.`);
+      return;
+    }
+  } catch(e) {}
+  // Fallback: if user pasted email or "홍길동 hong@rstone.co.kr"
+  const emailMatch = raw.match(/([a-zA-Z0-9._%+-]+@rstone\.co\.kr|[a-zA-Z0-9._%+-]+)/);
+  if (emailMatch) {
+    const em = normalizeRstoneEmail(emailMatch[1]);
+    const namePart = raw.replace(emailMatch[0], '').trim() || '신청임직원';
+    addOrUpdateApplicantInRoster(namePart, em, '1234', 'PENDING');
+    if (inp) inp.value = '';
+    showKakaoToast(`✅ [${namePart} / ${em}] 승인 대기 목록에 추가되었습니다!`);
+    return;
+  }
+  showKakaoToast('⚠️ 올바른 신청코드 또는 이메일 형식이 아닙니다.');
+}
+
+function addOrUpdateApplicantInRoster(name, rawEmail, pw, status = 'PENDING') {
+  const em = normalizeRstoneEmail(rawEmail);
+  if (!em || !em.endsWith(ALLOWED_EMAIL_DOMAIN)) {
+    showKakaoToast('⛔ @rstone.co.kr 사내 메일 아이디만 등록할 수 있습니다.');
+    return null;
+  }
+  const code = computeApprovalCodeForEmail(em);
+  const today = new Date().toLocaleDateString('ko-KR');
+  const cleanName = (name || '').trim() || '신청임직원';
+  const cleanPw = (pw || '').trim() || code;
+
+  authConfig.revokedEmails = (authConfig.revokedEmails || []).filter(x => x !== em);
+  const idx = authConfig.userList.findIndex(u => u.email === em);
+  if (idx >= 0) {
+    authConfig.userList[idx].name = cleanName;
+    if (pw) authConfig.userList[idx].password = cleanPw;
+    authConfig.userList[idx].code = code;
+    authConfig.userList[idx].status = status;
+    authConfig.userList[idx].date = today;
+  } else {
+    authConfig.userList.unshift({
+      email: em,
+      name: cleanName,
+      password: cleanPw,
+      code: code,
+      status: status,
+      date: today
+    });
+  }
+
+  if (status === 'APPROVED') {
+    approvedAccountsMap[em] = {
+      email: em,
+      name: cleanName,
+      password: cleanPw,
+      code: code,
+      approvedAt: today,
+      masterPinAtApproval: authConfig.masterPin
+    };
+    saveApprovedAccountsMap();
+  }
+  try {
+    localStorage.setItem('RS_PENDING_PW_' + em, cleanPw);
+    localStorage.setItem('RS_PENDING_NAME', cleanName);
+  } catch(e) {}
+  saveAuthConfigToStorage();
+  pushRosterToSharedCloud();
+  openAuthAndApkModal('AUTH');
+  return em;
+}
+
+function quickAdminRegisterApplicant(mode = 'PENDING') {
+  const name = (document.getElementById('quickPendingNameInput')?.value || '').trim();
+  const rawId = (document.getElementById('quickPendingEmailInput')?.value || '').trim().toLowerCase();
+  const pw = (document.getElementById('quickPendingPwInput')?.value || '').trim();
+  if (!rawId) {
+    showKakaoToast('⚠️ 신청자의 @rstone.co.kr 메일 아이디를 입력해 주세요.');
+    return;
+  }
+  const em = addOrUpdateApplicantInRoster(name || '임직원', rawId, pw || '1234', mode);
+  if (em) {
+    showKakaoToast(mode === 'APPROVED'
+      ? `✅ [${name || em}] 즉시 사용 승인 완료! 이제 해당 계정으로 바로 로그인됩니다.`
+      : `🟡 [${name || em}] 승인 대기 리스트에 등록되었습니다. [즉시 승인] 버튼을 눌러 승인하세요.`);
+  }
+}
+
+function approveAllPendingUsers() {
+  let cnt = 0;
+  const today = new Date().toLocaleDateString('ko-KR');
+  authConfig.userList.forEach(u => {
+    if (u.status === 'PENDING') {
+      u.status = 'APPROVED';
+      u.approvedAt = today;
+      approvedAccountsMap[u.email] = {
+        email: u.email,
+        name: u.name || '임직원',
+        password: u.password || u.code || computeApprovalCodeForEmail(u.email),
+        code: u.code || computeApprovalCodeForEmail(u.email),
+        approvedAt: today,
+        masterPinAtApproval: authConfig.masterPin
+      };
+      cnt++;
+    }
+  });
+  saveAuthConfigToStorage();
+  saveApprovedAccountsMap();
+  pushRosterToSharedCloud();
+  showKakaoToast(`✅ 대기 중이던 ${cnt}명의 신청자를 모두 일괄 승인했습니다!`);
+  openAuthAndApkModal('AUTH');
+}
+
+function setUserToPending(email) {
+  const u = authConfig.userList.find(x => x.email === email);
+  if (!u) return;
+  u.status = 'PENDING';
+  saveAuthConfigToStorage();
+  pushRosterToSharedCloud();
+  showKakaoToast(`🟡 ${u.name || email} 계정을 승인 대기 상태로 전환했습니다.`);
+  openAuthAndApkModal('AUTH');
+}
+
+function copyApprovedUserNotice(email) {
+  const u = authConfig.userList.find(x => x.email === email);
+  if (!u) return;
+  const code = u.code || computeApprovalCodeForEmail(email);
+  const pwInfo = u.password ? `${u.password} (또는 승인코드 ${code})` : `승인코드 ${code}`;
+  const txt = `[레드스톤 조달IT 통합시스템 로그인 승인 안내]\n• 승인 계정: ${u.name || '임직원'} (${email})\n• 로그인 비밀번호: ${pwInfo}\n• 지금 로그인 탭에서 위 정보로 바로 접속하실 수 있습니다.`;
+  navigator.clipboard?.writeText(txt);
+  showKakaoToast(`📋 [${u.name || email}] 승인 완료 안내문이 복사되었습니다! 카톡으로 전달해 주세요.`);
+}
+
 function requestSimpleUserApproval() {
   const name = (document.getElementById('signupNameInput')?.value || '').trim();
   const pw = (document.getElementById('signupPasswordInput')?.value || '').trim();
@@ -7071,6 +7382,15 @@ function requestSimpleUserApproval() {
   const code = computeApprovalCodeForEmail(em);
   const today = new Date().toLocaleDateString('ko-KR');
 
+  const entry = {
+    email: em,
+    name: name,
+    password: pw,
+    code: code,
+    status: 'PENDING',
+    date: today
+  };
+
   const idx = authConfig.userList.findIndex(u => u.email === em);
   if (idx >= 0) {
     if (authConfig.userList[idx].status === 'APPROVED') {
@@ -7079,28 +7399,30 @@ function requestSimpleUserApproval() {
       switchGateTab('LOGIN');
       return;
     }
-    authConfig.userList[idx].name = name;
-    authConfig.userList[idx].password = pw;
-    authConfig.userList[idx].status = 'PENDING';
-    authConfig.userList[idx].date = today;
+    authConfig.userList[idx] = entry;
   } else {
-    authConfig.userList.unshift({
-      email: em,
-      name: name,
-      password: pw,
-      code: code,
-      status: 'PENDING',
-      date: today
-    });
+    authConfig.userList.unshift(entry);
   }
   try {
     localStorage.setItem('RS_PENDING_PW_' + em, pw);
     localStorage.setItem('RS_PENDING_NAME', name);
+    localStorage.setItem('RS_PENDING_EMAIL', em);
   } catch(e) {}
   saveAuthConfigToStorage();
+  pushRosterToSharedCloud();
 
-  msgEl.className = 'text-[11px] text-center font-bold text-emerald-300';
-  msgEl.textContent = `✅ [${name} / ${em}] 승인 대기 리스트에 등록되었습니다! 관리자 승인 후 바로 로그인 가능합니다.`;
+  const reqToken = makeApplicantRequestToken(entry);
+  try { navigator.clipboard?.writeText(reqToken); } catch(e) {}
+
+  msgEl.className = 'text-[11px] text-left font-bold text-emerald-300 bg-slate-900/90 p-3 rounded-xl border border-emerald-500/40 space-y-2';
+  msgEl.innerHTML = `
+    <div>✅ <strong>[${name} / ${em}]</strong> 승인 신청이 등록되었습니다!</div>
+    <div class="text-[10px] text-slate-300 font-normal">다른 기기(PC/휴대폰)에 있는 관리자에게 신청 내역을 즉시 전달하려면 아래 <strong>[신청코드 복사]</strong>를 눌러 카톡으로 전달하거나, 관리자가 <strong>[메일 승인 · 차단 관리]</strong> 창에서 성함/이메일을 승인하면 바로 로그인됩니다.</div>
+    <div class="flex flex-wrap gap-1.5 pt-1">
+      <button onclick="navigator.clipboard.writeText('${reqToken}'); showKakaoToast('📋 신청코드가 복사되었습니다! 관리자에게 카톡으로 전달해 주세요.');" class="px-2.5 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-black text-[11px]">📋 관리자 전달용 신청코드 복사</button>
+      <button onclick="pullRosterFromSharedCloud(false); switchGateTab('LOGIN');" class="px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white font-black text-[11px]">🔑 로그인 화면으로 이동</button>
+    </div>
+  `;
 }
 
 function approvePendingUser(email) {
@@ -7119,40 +7441,113 @@ function approvePendingUser(email) {
   };
   saveAuthConfigToStorage();
   saveApprovedAccountsMap();
-  showKakaoToast(`✅ ${u.name || email} 계정이 승인되었습니다!`);
+  pushRosterToSharedCloud();
+  showKakaoToast(`✅ ${u.name || email} 계정이 승인 완료되었습니다! 이제 바로 로그인이 가능합니다.`);
   openAuthAndApkModal('AUTH');
 }
 
-// --- Override openAuthAndApkModal to show Pending Applicants List clearly ---
+// --- Override openAuthAndApkModal to show Full Interactive Pending & Approval Control Center ---
 const _origOpenAuthAndApkModal = openAuthAndApkModal;
 openAuthAndApkModal = function(activeSub = 'AUTH') {
   _origOpenAuthAndApkModal(activeSub);
   const pendingUsers = authConfig.userList.filter(u => u.status === 'PENDING');
+  const approvedUsers = authConfig.userList.filter(u => u.status === 'APPROVED' && !authConfig.revokedEmails.includes(u.email));
   const modalBody = document.getElementById('modalBody');
   if (modalBody && activeSub === 'AUTH') {
     const pendingHtml = `
-      <div class="bg-amber-50 border-2 border-amber-300 rounded-xl p-3.5 mb-3 space-y-2">
-        <div class="flex items-center justify-between">
-          <div class="text-xs font-black text-amber-900">🟡 승인 대기 신청자 리스트 (${pendingUsers.length}명)</div>
-          <span class="text-[10px] font-bold text-amber-700">이름·메일 확인 후 [즉시 승인] 클릭</span>
+      <div class="bg-amber-50 border-2 border-amber-400 rounded-2xl p-4 mb-4 space-y-3 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200 pb-2.5">
+          <div>
+            <div class="text-sm font-black text-amber-950 flex items-center gap-1.5">
+              <span>🟡 승인 대기 신청자 관리 & 즉시 승인 센터</span>
+              <span class="px-2 py-0.5 rounded-full bg-amber-500 text-white text-xs font-black">대기 ${pendingUsers.length}명 / 승인완료 ${approvedUsers.length}명</span>
+            </div>
+            <p class="text-[11px] text-amber-800 mt-0.5">일반 유저가 신청한 대기 목록을 승인하거나, 신청자의 이름·메일(또는 신청코드)을 넣어 1초 만에 대기 등록·즉시 승인할 수 있습니다.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+            <button onclick="pullRosterFromSharedCloud(false)" class="px-2.5 py-1.5 rounded-lg bg-white border border-amber-400 hover:bg-amber-100 text-amber-950 font-extrabold text-[11px] shadow-2xs transition">
+              🔄 신청자 새로고침
+            </button>
+            ${pendingUsers.length > 0 ? `
+              <button onclick="approveAllPendingUsers()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] shadow-xs transition">
+                ✅ 대기자(${pendingUsers.length}명) 전체 일괄승인
+              </button>
+            ` : ''}
+          </div>
         </div>
-        ${pendingUsers.length === 0 ? '<div class="text-[11px] text-amber-700">현재 승인 대기 중인 신청자가 없습니다.</div>' : `
-          <div class="space-y-1.5">
+
+        <!-- 1. Pending Users Action List -->
+        ${pendingUsers.length === 0 ? `
+          <div class="bg-white/90 border border-amber-200 rounded-xl p-3 text-xs text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div class="font-bold text-slate-800">💡 현재 대기 중인 신청자가 표시되지 않나요?</div>
+              <div class="text-[11px] text-slate-500">다른 PC/휴대폰에서 신청한 경우 아래 <strong>[신청자 이름·이메일 직접 등록/승인]</strong> 또는 <strong>[신청코드 붙여넣기]</strong>로 즉시 승인 처리할 수 있습니다.</div>
+            </div>
+            <button onclick="addOrUpdateApplicantInRoster('홍길동(예시)', 'hong@rstone.co.kr', '1234', 'PENDING')" class="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[11px] shrink-0">
+              🧪 대기 신청자 예시 넣기
+            </button>
+          </div>
+        ` : `
+          <div class="space-y-2">
             ${pendingUsers.map(u => `
-              <div class="flex items-center justify-between bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs">
-                <div>
-                  <span class="font-black text-slate-900">${u.name || '이름없음'}</span>
-                  <span class="text-indigo-700 font-mono font-bold ml-1.5">${u.email}</span>
-                  <span class="text-[10px] text-slate-400 ml-1.5">신청일: ${u.date || '-'}</span>
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between bg-white border-2 border-amber-300 rounded-xl px-3.5 py-2.5 text-xs gap-2 shadow-2xs">
+                <div class="space-y-0.5">
+                  <div class="flex items-center gap-1.5">
+                    <span class="px-2 py-0.5 rounded bg-amber-500 text-white font-black text-[10px]">🟡 승인대기</span>
+                    <span class="font-black text-slate-900 text-sm">${u.name || '이름없음'}</span>
+                    <span class="text-indigo-700 font-mono font-bold">${u.email}</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500">
+                    신청일: ${u.date || '-'} · 신청 비밀번호: <strong class="font-mono text-slate-800">${u.password || '미설정'}</strong> · 6자리 승인코드: <strong class="font-mono text-indigo-700">${u.code}</strong>
+                  </div>
                 </div>
-                <div class="flex items-center space-x-1.5">
-                  <button onclick="approvePendingUser('${u.email}')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px]">✅ 즉시 승인</button>
-                  <button onclick="revokeUserAccess('${u.email}')" class="px-2 py-1 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold text-[11px]">🚫 거절</button>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button onclick="approvePendingUser('${u.email}')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-sm transition">
+                    ✅ 즉시 승인 (로그인 허용)
+                  </button>
+                  <button onclick="revokeUserAccess('${u.email}')" class="px-2.5 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 font-extrabold text-xs transition">
+                    🚫 거절/차단
+                  </button>
+                  <button onclick="deleteUserFromRoster('${u.email}')" class="px-2 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs">
+                    삭제
+                  </button>
                 </div>
               </div>
             `).join('')}
           </div>
         `}
+
+        <!-- 2. Direct Applicant Add / Instant Approve Control Bar right inside the Pending Box -->
+        <div class="bg-white rounded-xl p-3 border border-amber-300 space-y-2.5">
+          <div class="font-extrabold text-slate-800 text-xs flex items-center justify-between">
+            <span>➕ 신청자 직접 대기등록 / 원클릭 즉시 승인 (이름 + 사내메일)</span>
+            <span class="text-[10px] text-slate-500">타 기기 신청자도 여기서 바로 등록·승인 가능</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <input type="text" id="quickPendingNameInput" placeholder="신청자 이름 (예: 홍길동)" class="sm:col-span-3 px-2.5 py-2 rounded-lg border border-slate-300 text-xs font-bold">
+            <div class="sm:col-span-4 flex items-center">
+              <input type="text" id="quickPendingEmailInput" placeholder="메일 아이디 (예: hong)" class="w-full px-2.5 py-2 rounded-l-lg border border-slate-300 font-mono text-xs font-bold">
+              <span class="px-2 py-2 rounded-r-lg bg-slate-100 border border-l-0 border-slate-300 text-slate-700 font-mono text-[11px] font-bold shrink-0">@rstone.co.kr</span>
+            </div>
+            <input type="text" id="quickPendingPwInput" placeholder="초기비번 (예: 1234)" class="sm:col-span-2 px-2.5 py-2 rounded-lg border border-slate-300 font-mono text-xs font-bold">
+            <div class="sm:col-span-3 flex items-center gap-1">
+              <button onclick="quickAdminRegisterApplicant('PENDING')" class="flex-1 py-2 px-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-black text-[11px] transition" title="대기 리스트에 먼저 올립니다">
+                🟡 대기등록
+              </button>
+              <button onclick="quickAdminRegisterApplicant('APPROVED')" class="flex-1 py-2 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] transition" title="대기 없이 바로 승인 완료합니다">
+                ✅ 즉시승인
+              </button>
+            </div>
+          </div>
+
+          <!-- Paste Applicant Request Code -->
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 pt-1 border-t border-slate-100">
+            <input type="text" id="pendingTokenPasteInput" placeholder="📋 일반 유저가 복사해 준 신청코드(RSREQ-...) 또는 '이름 이메일' 붙여넣기" class="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[11px] font-mono">
+            <button onclick="importApplicantRequestToken()" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-[11px] shrink-0">
+              📥 신청코드로 대기목록 불러오기
+            </button>
+          </div>
+        </div>
       </div>
     `;
     modalBody.insertAdjacentHTML('afterbegin', pendingHtml);
@@ -7292,7 +7687,7 @@ if (rawData && Array.isArray(rawData.spec_matrix)) {
   });
 }
 
-// --- Item 1: Interactive Quote Options + Quantity inside Kakao Quote Modal ---
+// --- Item 1: Interactive Quote Options + Quantity + Reliable Android/PC Image(.png) & Text(.txt) Save ---
 var kakaoQuoteState = {
   model: null,
   qty: 1,
@@ -7304,20 +7699,53 @@ var kakaoQuoteState = {
   cardReader: false
 };
 
+function resolveRedstoneModelForKakao(modelOrId) {
+  if (modelOrId && typeof modelOrId === 'object' && modelOrId.id) return modelOrId;
+  const sid = String(modelOrId || '').trim();
+  if (sid) {
+    if (kakaoQuoteState.model && String(kakaoQuoteState.model.id) === sid) return kakaoQuoteState.model;
+    if (typeof globalModelMap !== 'undefined' && globalModelMap[sid]) return globalModelMap[sid];
+    if (typeof searchRedstoneModelsOnly === 'function') {
+      const matches = searchRedstoneModelsOnly(sid);
+      if (matches && matches.length > 0) return matches[0];
+    }
+    if (typeof rawData !== 'undefined' && Array.isArray(rawData.models)) {
+      const m1 = rawData.models.find(x => String(x.id) === sid || String(x.model) === sid);
+      if (m1) return m1;
+    }
+    if (typeof ledger !== 'undefined' && Array.isArray(ledger.m)) {
+      const lm = ledger.m.find(x => String(x[0]) === sid);
+      if (lm) {
+        return {
+          id: lm[0],
+          company: lm[1] || '레드스톤시스템',
+          model: lm[2] || sid,
+          cat: (typeof CAT_NAMES !== 'undefined' && CAT_NAMES[lm[3]]) ? CAT_NAMES[lm[3]] : '데스크톱',
+          cpu: lm[4] || '-',
+          ram: lm[5] || '-',
+          ssd: lm[6] || '-',
+          price: Number(lm[7] || 0)
+        };
+      }
+    }
+  }
+  return kakaoQuoteState.model || (typeof currentKakaoMatchedRsModels !== 'undefined' && currentKakaoMatchedRsModels[0]) || null;
+}
+
 function computeKakaoQuoteTotals(m) {
-  const basePrice = Number(m.price || 0);
+  const basePrice = Number((m && m.price) || 0);
   const qty = Math.max(1, Number(kakaoQuoteState.qty || 1));
   const opts = [];
   let optUnit = 0;
-  if (m.cat !== '모니터') {
-    if (kakaoQuoteState.winPro) { opts.push({ name: 'Windows 11 Pro (24445466)', price: 153500 }); optUnit += 153500; }
-    else if (kakaoQuoteState.winHome) { opts.push({ name: 'Windows 11 Home (24445465)', price: 122000 }); optUnit += 122000; }
-    if (kakaoQuoteState.basicInst) { opts.push({ name: '기본설치 (25424957)', price: 26000 }); optUnit += 26000; }
-    if (kakaoQuoteState.advInst) { opts.push({ name: '고급설치·이관 (25424928)', price: 36000 }); optUnit += 36000; }
-    if (kakaoQuoteState.dvd) { opts.push({ name: '내장형 DVD-RW (23709952)', price: 10000 }); optUnit += 10000; }
-    if (kakaoQuoteState.cardReader) { opts.push({ name: '멀티카드리더기 (23709991)', price: 5000 }); optUnit += 5000; }
+  if (!m || m.cat !== '모니터') {
+    if (kakaoQuoteState.winPro) { opts.push({ name: 'Windows 11 Pro (식별번호 24445466)', price: 153500 }); optUnit += 153500; }
+    else if (kakaoQuoteState.winHome) { opts.push({ name: 'Windows 11 Home (식별번호 24445465)', price: 122000 }); optUnit += 122000; }
+    if (kakaoQuoteState.basicInst) { opts.push({ name: '컴퓨터 기본설치 (식별번호 25424957)', price: 26000 }); optUnit += 26000; }
+    if (kakaoQuoteState.advInst) { opts.push({ name: '컴퓨터 고급설치·이관 (식별번호 25424928)', price: 36000 }); optUnit += 36000; }
+    if (kakaoQuoteState.dvd) { opts.push({ name: '내장형 DVD-RW (식별번호 23709952)', price: 10000 }); optUnit += 10000; }
+    if (kakaoQuoteState.cardReader) { opts.push({ name: '멀티카드리더기 (식별번호 23709991)', price: 5000 }); optUnit += 5000; }
   } else {
-    if (kakaoQuoteState.basicInst) { opts.push({ name: '기본설치 (25424957)', price: 26000 }); optUnit += 26000; }
+    if (kakaoQuoteState.basicInst) { opts.push({ name: '모니터 기본설치 (식별번호 25424957)', price: 26000 }); optUnit += 26000; }
   }
   const unitWithOpt = basePrice + optUnit;
   return { basePrice, qty, opts, optUnit, unitWithOpt, totalBase: basePrice * qty, totalWithOpt: unitWithOpt * qty };
@@ -7334,66 +7762,470 @@ function toggleKakaoQuoteOpt(key, val) {
   }
 }
 
-buildKakaoTextSummary = function(m) {
+buildKakaoTextSummary = function(modelOrId) {
+  const m = resolveRedstoneModelForKakao(modelOrId);
+  if (!m) return '';
   const specs = getRedstoneModelSpecDetail(m);
   const q = computeKakaoQuoteTotals(m);
+  const refDate = document.getElementById('headerDataRefDateText')?.textContent || '2026-11-12';
   const optLines = q.opts.length > 0
     ? q.opts.map(o => `• ${o.name}: +${o.price.toLocaleString()}원`).join('\n')
-    : '• 선택 옵션 없음 (본체 단독)';
+    : '• 선택 옵션 없음 (본체 기본사양 단독)';
   return [
-    `📌 [레드스톤시스템 조달 견적 요약]`,
+    `📌 [(주)레드스톤시스템 조달 견적서]`,
     `━━━━━━━━━━━━━━━━━━━━`,
     `1️⃣ 모델명 및 물품식별번호`,
     `• 제조사: (주)레드스톤시스템`,
-    `• 품목 / 모델명: [${m.cat}] ${m.model}`,
+    `• 품목 / 모델명: [${m.cat || '데스크톱'}] ${m.model}`,
     `• 물품식별번호: ${m.id}`,
     ``,
-    `2️⃣ 세부사양`,
+    `2️⃣ 세부사양 (나라장터 등록 규격)`,
     ...specs.map(s => `• ${s.label}: ${s.val}`),
     ``,
     `3️⃣ 조달가격 (본체 기준)`,
-    `• 본체 조달단가: ${q.basePrice.toLocaleString()}원`,
+    `• 1대 기준단가: ${q.basePrice.toLocaleString()}원`,
     `• 견적 수량: ${q.qty}대 (본체 합계: ${q.totalBase.toLocaleString()}원)`,
     ``,
     `4️⃣ 옵션포함가격`,
     optLines,
     `------------------------------------`,
-    `✅ 1대당 옵션포함가: ${q.unitWithOpt.toLocaleString()}원`,
-    `💰 총 견적 합계 (${q.qty}대): ${q.totalWithOpt.toLocaleString()}원`
+    `✅ 1대당 옵션포함 단가: ${q.unitWithOpt.toLocaleString()}원`,
+    `💰 총 견적 합계 (${q.qty}대, VAT포함): ${q.totalWithOpt.toLocaleString()}원`,
+    `📅 기준일자: ${refDate}`
   ].join('\n');
 };
 
-const _origRenderSelectedKakao = renderSelectedKakaoModelCard;
+// Compatibility-safe Canvas Drawing (uses fillRect/strokeRect only so older Android WebViews never fail on roundRect)
+renderKakaoCardToCanvas = function(modelOrId) {
+  const m = resolveRedstoneModelForKakao(modelOrId);
+  const canvas = document.createElement('canvas');
+  const W = 900;
+  const H = 1100;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!m || !ctx) return canvas;
+
+  const q = computeKakaoQuoteTotals(m);
+  const specs = getRedstoneModelSpecDetail(m);
+  const refDate = document.getElementById('headerDataRefDateText')?.textContent || '2026-11-12';
+
+  // Background
+  ctx.fillStyle = '#F8FAFC';
+  ctx.fillRect(0, 0, W, H);
+
+  // Header Banner
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, '#991B1B');
+  grad.addColorStop(0.6, '#1E1B4B');
+  grad.addColorStop(1, '#0F172A');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, 145);
+
+  ctx.fillStyle = '#FEE500';
+  ctx.fillRect(36, 22, 270, 30);
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('🔴 (주)레드스톤시스템 조달 공식 견적서', 46, 43);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`품목: ${m.cat || '데스크톱'}  |  기준일: ${refDate}`, W - 36, 43);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 34px sans-serif';
+  ctx.fillText(`${m.model}`.slice(0, 32), 36, 92);
+
+  ctx.fillStyle = '#FDE047';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText(`1. 물품식별번호: ${m.id}   |   견적수량: ${q.qty}대`, 36, 126);
+
+  // Price Cards (3. 조달가격 & 4. 옵션포함가격)
+  const cardY = 165;
+  const cardW = 402;
+  const cardH = 126;
+
+  // Left Card: Base Price
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(36, cardY, cardW, cardH);
+  ctx.strokeStyle = '#CBD5E1';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(36, cardY, cardW, cardH);
+
+  ctx.fillStyle = '#475569';
+  ctx.font = 'bold 17px sans-serif';
+  ctx.fillText(`3. 조달가격 (본체 ${q.qty}대 합계)`, 56, cardY + 34);
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText(`${q.totalBase.toLocaleString()}원`, 56, cardY + 78);
+  ctx.fillStyle = '#64748B';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText(`1대 기준단가: ${q.basePrice.toLocaleString()}원`, 56, cardY + 108);
+
+  // Right Card: Option Included Price
+  const rightX = 36 + cardW + 24;
+  ctx.fillStyle = '#FEF2F2';
+  ctx.fillRect(rightX, cardY, cardW, cardH);
+  ctx.strokeStyle = '#DC2626';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(rightX, cardY, cardW, cardH);
+
+  ctx.fillStyle = '#991B1B';
+  ctx.font = 'bold 17px sans-serif';
+  ctx.fillText(`4. 옵션포함 견적가 (${q.qty}대 합계)`, rightX + 20, cardY + 34);
+  ctx.fillStyle = '#DC2626';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText(`${q.totalWithOpt.toLocaleString()}원`, rightX + 20, cardY + 78);
+  ctx.fillStyle = '#7F1D1D';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText(`1대당 옵션포함: ${q.unitWithOpt.toLocaleString()}원 (옵션 +${q.optUnit.toLocaleString()}원)`, rightX + 20, cardY + 108);
+
+  // Selected Options Section
+  let y = 320;
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('■ 선택된 조달 옵션 구성 내역', 36, y);
+  y += 14;
+
+  const optBoxH = 150;
+  ctx.fillStyle = '#FFFBEB';
+  ctx.fillRect(36, y, W - 72, optBoxH);
+  ctx.strokeStyle = '#F59E0B';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(36, y, W - 72, optBoxH);
+
+  ctx.fillStyle = '#78350F';
+  ctx.font = 'bold 17px sans-serif';
+  if (q.opts.length === 0) {
+    ctx.fillText('• 선택된 추가 옵션 없음 (본체 기본사양 단독 견적)', 56, y + 42);
+  } else {
+    q.opts.slice(0, 4).forEach((o, idx) => {
+      ctx.fillText(`• ${o.name} : +${o.price.toLocaleString()}원`, 56, y + 36 + idx * 31);
+    });
+  }
+
+  // Specs Table Section
+  y += optBoxH + 34;
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('2. 세부 사양 (나라장터 종합쇼핑몰 등록 규격)', 36, y);
+  y += 14;
+
+  const rowH = 54;
+  specs.slice(0, 8).forEach((s, idx) => {
+    const ry = y + idx * rowH;
+    ctx.fillStyle = idx % 2 === 0 ? '#FFFFFF' : '#F1F5F9';
+    ctx.fillRect(36, ry, W - 72, rowH);
+    ctx.strokeStyle = '#CBD5E1';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(36, ry, W - 72, rowH);
+
+    // Label col
+    ctx.fillStyle = '#E2E8F0';
+    ctx.fillRect(36, ry, 210, rowH);
+    ctx.strokeRect(36, ry, 210, rowH);
+
+    ctx.fillStyle = '#1E293B';
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText(String(s.label), 52, ry + 34);
+
+    ctx.fillStyle = '#0F172A';
+    ctx.font = 'bold 17px sans-serif';
+    ctx.fillText(String(s.val || '-').slice(0, 44), 264, ry + 34);
+  });
+
+  // Footer
+  ctx.fillStyle = '#64748B';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`(주)레드스톤시스템 조달 IT 시장 & 유지보수 통합시스템 · 카카오톡 전송용 공식 견적 카드`, W / 2, H - 20);
+  ctx.textAlign = 'left';
+  return canvas;
+};
+
+function dataURLToBlobSync(dataUrl) {
+  const parts = dataUrl.split(',');
+  const mime = parts[0].match(/:(.*?);/)[1] || 'image/png';
+  const bstr = atob(parts[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) u8arr[n] = bstr.charCodeAt(n);
+  return new Blob([u8arr], { type: mime });
+}
+
+// Universal Image Save (.png Blob Download + Fallback Modal)
+downloadKakaoSummaryImage = function(modelId) {
+  const m = resolveRedstoneModelForKakao(modelId);
+  if (!m) {
+    showKakaoToast('⚠️ 선택된 레드스톤 모델 정보를 찾을 수 없습니다.');
+    return;
+  }
+  try {
+    const canvas = renderKakaoCardToCanvas(m);
+    const dataUrl = canvas.toDataURL('image/png');
+    const blob = dataURLToBlobSync(dataUrl);
+    const blobUrl = URL.createObjectURL(blob);
+    const safeModel = String(m.model || m.id).replace(/[^a-zA-Z0-9가-힣_-]/g, '');
+    const fileName = `레드스톤_견적서_${m.id}_${safeModel}.png`;
+
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); } catch(e) {}
+    }, 3000);
+
+    const msgEl = document.getElementById('kakaoActionStatusMsg');
+    if (msgEl) {
+      msgEl.className = 'p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-extrabold text-emerald-800';
+      msgEl.innerHTML = `📸 <strong>[${fileName}]</strong> 이미지 다운로드가 실행되었습니다! (모바일 앱에서 다운로드가 안 될 경우 <strong>[📲 카톡/갤러리 바로공유]</strong>를 누르거나 아래 이미지를 1초간 길게 눌러 저장하세요.)`;
+    }
+    showKakaoToast(`📸 [${m.model}] 견적 이미지(.png) 저장 실행!`);
+  } catch(err) {
+    showKakaoToast('⚠️ 이미지 생성 중 오류가 발생했습니다: ' + err.message);
+  }
+};
+
+// Native Android / iOS Share Sheet for Image + Text directly to KakaoTalk or Gallery
+async function shareKakaoSummaryNative(modelId) {
+  const m = resolveRedstoneModelForKakao(modelId);
+  if (!m) return;
+  try {
+    const canvas = renderKakaoCardToCanvas(m);
+    const dataUrl = canvas.toDataURL('image/png');
+    const blob = dataURLToBlobSync(dataUrl);
+    const safeModel = String(m.model || m.id).replace(/[^a-zA-Z0-9가-힣_-]/g, '');
+    const fileName = `레드스톤_견적서_${m.id}_${safeModel}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    const txt = buildKakaoTextSummary(m);
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: `[레드스톤시스템] ${m.model} (${m.id}) 조달 견적서`,
+        text: txt,
+        files: [file]
+      });
+      showKakaoToast('📲 카카오톡/갤러리 공유창이 실행되었습니다!');
+      return;
+    } else if (navigator.share) {
+      await navigator.share({
+        title: `[레드스톤시스템] ${m.model} (${m.id}) 조달 견적서`,
+        text: txt
+      });
+      return;
+    }
+  } catch(e) {}
+  downloadKakaoSummaryImage(modelId);
+}
+
+// Universal Text Copy + .txt File Save
+copyKakaoSummaryText = function(modelId) {
+  const m = resolveRedstoneModelForKakao(modelId);
+  if (!m) {
+    showKakaoToast('⚠️ 선택된 레드스톤 모델 정보를 찾을 수 없습니다.');
+    return;
+  }
+  const txt = buildKakaoTextSummary(m);
+  let copied = false;
+
+  // 1. Synchronous textarea select + execCommand('copy') (Works 100% in Android WebView & Canvas iframe)
+  try {
+    const existingTa = document.getElementById('kakaoLivePreviewTextarea');
+    if (existingTa) {
+      existingTa.value = txt;
+      existingTa.focus();
+      existingTa.select();
+      existingTa.setSelectionRange(0, txt.length);
+      copied = document.execCommand('copy');
+    }
+    if (!copied) {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.position = 'fixed';
+      ta.style.left = '0';
+      ta.style.top = '0';
+      ta.style.opacity = '0.01';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, txt.length);
+      copied = document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  } catch(e) {}
+
+  // 2. Also fire async Clipboard API
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).catch(() => {});
+      copied = true;
+    }
+  } catch(e) {}
+
+  const msgEl = document.getElementById('kakaoActionStatusMsg');
+  if (msgEl) {
+    msgEl.className = 'p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-extrabold text-emerald-800';
+    msgEl.textContent = `✅ [${m.model} (${m.id})] 카카오톡 견적 텍스트가 복사되었습니다! 카톡 대화창에 바로 붙여넣기 하세요.`;
+  }
+  showKakaoToast(`✅ [${m.model}] 카카오톡 견적 텍스트가 복사되었습니다!`);
+};
+
+function downloadKakaoSummaryTextFile(modelId) {
+  const m = resolveRedstoneModelForKakao(modelId);
+  if (!m) return;
+  const txt = buildKakaoTextSummary(m);
+  const blob = new Blob(['\uFEFF' + txt], { type: 'text/plain;charset=utf-8;' });
+  const blobUrl = URL.createObjectURL(blob);
+  const safeModel = String(m.model || m.id).replace(/[^a-zA-Z0-9가-힣_-]/g, '');
+  const fileName = `레드스톤_견적서_${m.id}_${safeModel}.txt`;
+
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = blobUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    try { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); } catch(e) {}
+  }, 3000);
+
+  const msgEl = document.getElementById('kakaoActionStatusMsg');
+  if (msgEl) {
+    msgEl.className = 'p-2.5 rounded-xl bg-indigo-50 border border-indigo-300 text-xs font-extrabold text-indigo-800';
+    msgEl.textContent = `💾 [${fileName}] 견적 텍스트 파일(.txt)이 저장되었습니다!`;
+  }
+  showKakaoToast(`💾 [${fileName}] 텍스트 파일(.txt) 저장 완료!`);
+}
+
+// Complete replacement of renderSelectedKakaoModelCard so option checkboxes, image, text, and save buttons stay 100% in sync!
 renderSelectedKakaoModelCard = function(mid) {
-  const m = (typeof mid === 'string' ? globalModelMap[mid] : mid) || currentKakaoMatchedRsModels[0];
+  const container = document.getElementById('kakaoCardPreviewContainer');
+  if (!container) return;
+  const m = resolveRedstoneModelForKakao(mid);
+  if (!m) return;
   kakaoQuoteState.model = m;
-  _origRenderSelectedKakao(typeof mid === 'string' ? mid : (m ? m.id : ''));
-  const host = document.getElementById('kakaoCardPreviewContainer');
-  if (!host) return;
-  let bar = document.getElementById('kakaoQuoteOptControlBar');
-  if (!bar) {
-    const htmlBar = `
-      <div id="kakaoQuoteOptControlBar" class="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3 text-xs space-y-2">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="font-black text-amber-950">🧾 견적서 옵션 · 수량 실시간 선택 (텍스트/이미지 즉시 반영)</span>
-          <label class="flex items-center space-x-1.5 font-bold text-slate-800">
+
+  // Update active button state in bar
+  const bar = document.getElementById('kakaoMatchedModelsBar');
+  if (bar && typeof currentKakaoMatchedRsModels !== 'undefined' && currentKakaoMatchedRsModels.length > 0) {
+    bar.innerHTML = `
+      <div class="text-[11px] font-bold text-slate-700">🔴 검색된 레드스톤시스템 모델 (${currentKakaoMatchedRsModels.length}종) — 모델을 체크(클릭)하면 견적 이미지·텍스트가 즉시 전환됩니다:</div>
+      <div class="flex flex-wrap gap-1.5 max-h-[105px] overflow-y-auto scrollbar-thin">
+        ${currentKakaoMatchedRsModels.slice(0, 40).map(item => `
+          <button onclick="selectRedstoneModelForKakao('${item.id}')" class="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition flex items-center gap-1 ${item.id === m.id ? 'bg-rs-600 text-white border-rs-600 shadow-xs' : 'bg-white text-slate-800 border-slate-300 hover:bg-rs-50'}">
+            <span>${item.id === m.id ? '☑️' : '⬜'}</span>
+            <span>${item.model}</span>
+            <span class="font-mono text-[10px] opacity-80">(${item.id})</span>
+            <span>· ${fmtExactWon(item.price)}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  const q = computeKakaoQuoteTotals(m);
+  const canvas = renderKakaoCardToCanvas(m);
+  const imgDataUrl = canvas.toDataURL('image/png');
+  const kakaoText = buildKakaoTextSummary(m);
+
+  container.innerHTML = `
+    <!-- 1. Option & Quantity Check Bar -->
+    <div id="kakaoQuoteOptControlBar" class="bg-amber-50 border-2 border-amber-300 rounded-xl p-3.5 text-xs space-y-2.5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <span class="font-black text-amber-950 text-sm">🧾 1단계: 견적 옵션 · 수량 체크</span>
+          <span class="text-[11px] text-amber-800 ml-1.5">(체크 즉시 아래 견적 이미지와 텍스트 합계가 자동 변경됩니다)</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="font-extrabold text-rose-700 bg-white px-2.5 py-1 rounded-lg border border-rose-200">
+            옵션포함 합계(${q.qty}대): ${q.totalWithOpt.toLocaleString()}원
+          </span>
+          <label class="flex items-center space-x-1 font-bold text-slate-800 bg-white px-2.5 py-1 rounded-lg border border-amber-300">
             <span>수량:</span>
-            <input type="number" min="1" value="${kakaoQuoteState.qty}" onchange="toggleKakaoQuoteOpt('qty', Math.max(1, parseInt(this.value)||1))" class="w-16 px-2 py-1 rounded border border-amber-300 bg-white text-center font-black">
+            <input type="number" min="1" value="${kakaoQuoteState.qty}" onchange="toggleKakaoQuoteOpt('qty', Math.max(1, parseInt(this.value)||1))" class="w-14 px-1 py-0.5 rounded border border-slate-300 bg-slate-50 text-center font-black">
             <span>대</span>
           </label>
         </div>
-        <div class="flex flex-wrap gap-2 text-[11px] font-bold text-slate-700">
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.winPro?'checked':''} onchange="toggleKakaoQuoteOpt('winPro', this.checked)"><span>Win11 Pro(+153,500)</span></label>
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.winHome?'checked':''} onchange="toggleKakaoQuoteOpt('winHome', this.checked)"><span>Win11 Home(+122,000)</span></label>
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.basicInst?'checked':''} onchange="toggleKakaoQuoteOpt('basicInst', this.checked)"><span>기본설치(+26,000)</span></label>
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.advInst?'checked':''} onchange="toggleKakaoQuoteOpt('advInst', this.checked)"><span>고급설치(+36,000)</span></label>
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.dvd?'checked':''} onchange="toggleKakaoQuoteOpt('dvd', this.checked)"><span>DVD(+10,000)</span></label>
-          <label class="inline-flex items-center space-x-1 bg-white px-2 py-1 rounded border"><input type="checkbox" ${kakaoQuoteState.cardReader?'checked':''} onchange="toggleKakaoQuoteOpt('cardReader', this.checked)"><span>카드리더기(+5,000)</span></label>
-        </div>
       </div>
-    `;
-    host.insertAdjacentHTML('afterbegin', htmlBar);
-  }
+      <div class="flex flex-wrap gap-2 text-xs font-bold text-slate-800">
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.winPro?'checked':''} onchange="toggleKakaoQuoteOpt('winPro', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>Windows 11 Pro (+153,500원)</span>
+        </label>
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.winHome?'checked':''} onchange="toggleKakaoQuoteOpt('winHome', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>Windows 11 Home (+122,000원)</span>
+        </label>
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.basicInst?'checked':''} onchange="toggleKakaoQuoteOpt('basicInst', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>컴퓨터 기본설치 (+26,000원)</span>
+        </label>
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.advInst?'checked':''} onchange="toggleKakaoQuoteOpt('advInst', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>고급설치·이관 (+36,000원)</span>
+        </label>
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.dvd?'checked':''} onchange="toggleKakaoQuoteOpt('dvd', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>내장형 DVD-RW (+10,000원)</span>
+        </label>
+        <label class="inline-flex items-center space-x-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-300 cursor-pointer hover:bg-amber-100/50">
+          <input type="checkbox" ${kakaoQuoteState.cardReader?'checked':''} onchange="toggleKakaoQuoteOpt('cardReader', this.checked)" class="w-4 h-4 accent-rose-600">
+          <span>멀티카드리더기 (+5,000원)</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 2. Action Bar for Image Save, Mobile Share, Text Copy, and Text File Download -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-900 text-white p-3.5 rounded-xl">
+      <div>
+        <span class="px-2 py-0.5 rounded bg-rs-600 text-white text-[10px] font-black mr-1">레드스톤 견적카드</span>
+        <span class="text-amber-300 font-black">[식별번호 ${m.id}]</span>
+        <strong class="ml-1">${m.model}</strong>
+        <span class="text-emerald-300 font-bold ml-1.5">(총 ${q.totalWithOpt.toLocaleString()}원)</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button onclick="downloadKakaoSummaryImage('${m.id}')" class="px-3 py-2 rounded-xl bg-[#FEE500] hover:bg-[#fdd800] text-slate-950 font-black text-xs shadow-sm transition">
+          📸 이미지(.png) 파일 저장
+        </button>
+        <button onclick="shareKakaoSummaryNative('${m.id}')" class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-sm transition">
+          📲 카톡/갤러리 바로공유
+        </button>
+        <button onclick="copyKakaoSummaryText('${m.id}')" class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-sm transition">
+          📋 견적 텍스트 복사
+        </button>
+        <button onclick="downloadKakaoSummaryTextFile('${m.id}')" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs shadow-sm transition">
+          💾 텍스트(.txt) 파일 저장
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. Side-by-Side Image & Text Preview -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="bg-slate-100 p-3 rounded-xl border border-slate-200 space-y-2">
+        <div class="font-bold text-slate-800 text-[11px] flex items-center justify-between">
+          <span>📸 카카오톡 전송용 견적 이미지 (모바일에선 이미지를 1초간 길게 눌러도 바로 저장됩니다)</span>
+          <button onclick="downloadKakaoSummaryImage('${m.id}')" class="text-rose-600 font-extrabold underline">PNG 저장</button>
+        </div>
+        <img id="kakaoLivePreviewImg" src="${imgDataUrl}" alt="Redstone Kakao Spec Card" class="w-full rounded-lg border border-slate-300 shadow-xs">
+      </div>
+      <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col space-y-2">
+        <div class="font-bold text-slate-800 text-[11px] flex items-center justify-between">
+          <span>💬 카카오톡 대화창 붙여넣기용 견적 텍스트</span>
+          <div class="space-x-2">
+            <button onclick="copyKakaoSummaryText('${m.id}')" class="text-emerald-700 font-extrabold underline">텍스트 복사</button>
+            <button onclick="downloadKakaoSummaryTextFile('${m.id}')" class="text-indigo-700 font-extrabold underline">TXT 파일저장</button>
+          </div>
+        </div>
+        <textarea id="kakaoLivePreviewTextarea" readonly onclick="this.select();" class="w-full flex-1 min-h-[340px] p-3 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-800 leading-relaxed focus:outline-none">${kakaoText}</textarea>
+      </div>
+    </div>
+  `;
 };
 
 // Initialize Reference Date on Load
