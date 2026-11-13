@@ -7,9 +7,11 @@ const KEY = process.env.G2B_KEY;
 if (!KEY) throw new Error('환경변수 G2B_KEY(인증키)가 없습니다.');
 const BASE = 'https://apis.data.go.kr/1230000/ao/CntrctInfoService';
 const CODES = ['4323300401','8111180901','4321150701','4321190201','4320181801','4321170201','4321159301'];
-const LOOKBACK = Number(process.env.LOOKBACK_DAYS || 35);
+const LOOKBACK = Number(process.env.LOOKBACK_DAYS || 21);
+const CHUNK = Number(process.env.CHUNK_DAYS || 7);          // 조달청 API 조회기간 제한: 7일 (2026-11-10 변경)
 const BACKFILL_FROM = process.env.BACKFILL_FROM;
 const MAINT = /유지보수|유지관리|유지 보수|유지 관리/;
+const NAMES = {'4321150701':'데스크톱컴퓨터','4321190201':'액정모니터','4321159301':'일체형컴퓨터','4323300401':'운영체제','8111180901':'컴퓨터및주변기기설치','4320181801':'DVD드라이브','4321170201':'마그네틱카드판독기'};
 const HEAD = ['연도','계약일자','계약번호','수요기관코드','수요기관','소관구분','지역','세부품명번호','세부품명','물품식별번호','품목명','업체명','단가','수량','공급금액'];
 
 const ymd = d => d.toISOString().slice(0,10).replace(/-/g,'');
@@ -17,10 +19,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const kstToday = () => new Date(Date.now() + 9*3600e3).toISOString().slice(0,10);
 const sample = {};
 
-function chunks(from, to) {                 // 조회기간 1개월 제한 → 30일씩
+function chunks(from, to) {                 // 조회기간 제한(7일)에 맞춰 분할
   const out = []; let s = new Date(from);
   while (s <= to) {
-    const e = new Date(Math.min(s.getTime() + 29*864e5, to.getTime()));
+    const e = new Date(Math.min(s.getTime() + (CHUNK-1)*864e5, to.getTime()));
     out.push([ymd(s)+'0000', ymd(e)+'2359']); s = new Date(e.getTime() + 864e5);
   }
   return out;
@@ -71,7 +73,7 @@ function toTxRow(it) {
   return [dt.slice(0,4), dt, it.untyCntrctNo || it.cntrctNo || '',
     it.dminsttCd || dm.code || '', it.dminsttNm || it.orderInsttNm || dm.name || '',
     it.dminsttDivNm || '기타기관', it.dminsttRgnNm || '', cls,
-    it.dtilPrdctClsfcNm || it.prdctClsfcNm || '', it.prdctIdntNo || '', it.prdctNm || it.cntrctNm || '',
+    it.dtilPrdctClsfcNm || it.prdctClsfcNm || NAMES[cls] || '', it.prdctIdntNo || '', it.prdctNm || it.cntrctNm || '',
     it.corpNm || it.entrprsNm || corp.name || '', num(it.prdctUprc), num(it.prdctQty || it.cntrctQty) || 1,
     num(it.prdctAmt || it.totCntrctAmt)];
 }
@@ -91,13 +93,17 @@ const periods = chunks(from, today);
 console.log(`수집기간 ${ymd(from)}~${ymd(today)} (${periods.length}구간)`);
 
 const tx = [], mt = [];
+const errors = [];
 for (const [bgn, end] of periods) {
+  try {
   const a = await fetchAll('getCntrctInfoListThngDetail', { inqryDiv: 1, inqryBgnDt: bgn, inqryEndDt: end });
   const t = a.map(toTxRow).filter(Boolean); tx.push(...t);
   const b = await fetchAll('getCntrctInfoListServcPPSSrch', { inqryDiv: 1, inqryBgnDt: bgn, inqryEndDt: end });
   const m = b.filter(r => MAINT.test(r.cntrctNm || '')).map(toMaintRow).filter(r => r[0] && r[2]); mt.push(...m);
   console.log(`${bgn.slice(0,8)}: 물품 ${a.length}→7대품목 ${t.length} / 용역 ${b.length}→유지보수 ${m.length}`);
+  } catch (e) { errors.push(`${bgn.slice(0,8)}~${end.slice(0,8)}: ${e.message}`); console.error('구간 실패', bgn, e.message); }
 }
+if (errors.length === periods.length) { console.error('모든 구간 실패 — 인증키·활용신청·파라미터를 확인하세요'); process.exit(1); }
 
 const txKey = r => [r[2], r[9], r[10], r[12]].join('|');
 const mtKey = r => [r[0], r[1], r[2], r[5], r[4]].join('|');
@@ -113,6 +119,7 @@ await fs.writeFile('data/sample_raw.json', JSON.stringify(sample, null, 1));
 await fs.writeFile('data/meta.json', JSON.stringify({
   baseDate: kstToday(),                      // 기준일자 = 업데이트 진행일
   updatedAt: new Date().toISOString(),
-  counts: { tx: mTx.size, maint: mMt.size }, fetchedThisRun: { tx: tx.length, maint: mt.length }
+  latestContractDate: [...mTx.values()].reduce((a, r) => (r[1] > a ? r[1] : a), ''),   // 수집된 최신 계약일
+  counts: { tx: mTx.size, maint: mMt.size }, fetchedThisRun: { tx: tx.length, maint: mt.length }, errors
 }, null, 2));
 console.log('완료', mTx.size, mMt.size);
