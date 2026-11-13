@@ -5961,8 +5961,8 @@
       const cardReaderPrice = 5000;
 
       const optLines = isMonitor ? [
-        `• 컴퓨터 기본설치 (식별번호 25424957): +26,000원`,
-        `  👉 모니터 + 기본설치 합계: ${(basePrice + basicInst).toLocaleString()}원`
+        `• 모니터는 설치비·별도 옵션 없음`,
+        `  👉 조달가격 그대로 공급: ${basePrice.toLocaleString()}원 (VAT 포함)`
       ] : [
         `• Windows 11 Pro (식별번호 24445466): +153,500원 (표준 171,000원)`,
         `• Windows 11 Home (식별번호 24445465): +122,000원`,
@@ -6124,8 +6124,7 @@
 
       const basePrice = Number(m.price || 0);
       const optRows = isMonitor ? [
-        ['컴퓨터 기본설치 (PC·모니터 연결 및 환경설정)', '식별번호: 25424957', '+26,000원', `합계: ${(basePrice + 26000).toLocaleString()}원`],
-        ['컴퓨터 미설치 (납품장소 배송만 진행)', '식별번호: 23709842', '+1원', `합계: ${(basePrice + 1).toLocaleString()}원`]
+        ['모니터는 설치비 없음 (별도 설치 옵션 없음)', '-', '+0원', `합계: ${basePrice.toLocaleString()}원`]
       ] : [
         ['Windows 11 Pro (운영체제 옵션)', '식별번호: 24445466', '+153,500원 (표준 171,000원)', `본체+OS 합계: ${(basePrice + 153500).toLocaleString()}원`],
         ['Windows 11 Home (운영체제 옵션)', '식별번호: 24445465', '+122,000원', `본체+OS 합계: ${(basePrice + 122000).toLocaleString()}원`],
