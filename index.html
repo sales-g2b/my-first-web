@@ -106,7 +106,7 @@
   <!-- ========================================================================= -->
   <!-- HOMEPAGE LOGIN, SIGN-UP & APPROVAL GATE OVERLAY (@rstone.co.kr EXCLUSIVE) -->
   <!-- ========================================================================= -->
-  <div id="emailApprovalGateOverlay" style="display:none;" class="hidden fixed inset-0 z-[100] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+  <div id="emailApprovalGateOverlay" class="fixed inset-0 z-[100] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
     <div class="max-w-md w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto">
       <!-- Brand Header -->
       <div class="text-center space-y-1">
@@ -281,12 +281,6 @@
       var ov = document.getElementById('emailApprovalGateOverlay');
       if (ov) {
         ov.classList.remove('hidden'); ov.style.display = '';
-        if (!document.getElementById('rsGateCloseBtn') && localStorage.getItem('RS_FORCE_LOCK_ON_STARTUP') !== 'true') {
-          var cb = document.createElement('button'); cb.id = 'rsGateCloseBtn'; cb.textContent = '✕ 닫기';
-          cb.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;padding:6px 12px;border-radius:8px;background:#fff;font-weight:800;font-size:12px';
-          cb.onclick = function() { ov.classList.add('hidden'); ov.style.display = 'none'; window.rsApplyAdminVisibility(); };
-          ov.appendChild(cb);
-        }
       }
       if (window.switchGateTab) window.switchGateTab('LOGIN');
     };
@@ -334,7 +328,7 @@
       if (window.rsIsMasterKey(codeRaw) || window.rsIsMasterKey(rawId)) {
         try {
           localStorage.setItem('RS_USER_UNLOCKED', 'true');
-          window.__rsAdminOK = true; localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
+          window.__rsAdminOK = true;
         } catch(e) {}
         var ov = document.getElementById('emailApprovalGateOverlay');
         if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; }
@@ -5522,7 +5516,7 @@ window.__RS_B64_STORE__ = {
       try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : defVal; } catch(e) { return defVal; }
     }
     var authConfig = {
-      requireApprovalGate: safeGetLS('RS_REQUIRE_GATE', 'true') !== 'false',
+      requireApprovalGate: true,
       adminEmail: (safeGetLS('RS_ADMIN_EMAIL', '') && !safeGetLS('RS_ADMIN_EMAIL', '').startsWith('admin@')) ? safeGetLS('RS_ADMIN_EMAIL', '') : 'mjm@rstone.co.kr',
       cloudRosterUrl: safeGetLS('RS_CLOUD_ROSTER_URL', '') || '',
       userList: safeJsonLS('RS_USER_ROSTER', []),
@@ -5635,10 +5629,6 @@ window.__RS_B64_STORE__ = {
 
     async function checkApprovalGateOnStartup() {
       const _ovInit = document.getElementById('emailApprovalGateOverlay');
-      if (safeGetLS('RS_FORCE_LOCK_ON_STARTUP', 'false') !== 'true') {
-        if (_ovInit) { _ovInit.classList.add('hidden'); _ovInit.style.display = 'none'; }
-        return;
-      }
       await syncCloudRevocationRoster();
       const adminLbl = document.getElementById('gateAdminEmailLabel');
       if (adminLbl) adminLbl.textContent = authConfig.adminEmail;
@@ -5647,7 +5637,7 @@ window.__RS_B64_STORE__ = {
       let isUnlocked = localStorage.getItem('RS_USER_UNLOCKED') === 'true';
 
       if (isUnlocked) {
-        if (unlockedEmail !== 'master_admin' && (!isValidRstoneEmail(unlockedEmail) || isEmailRevoked(unlockedEmail))) {
+        if (unlockedEmail === 'master_admin' || !isValidRstoneEmail(unlockedEmail) || isEmailRevoked(unlockedEmail)) {
           isUnlocked = false;
           try { localStorage.setItem('RS_USER_UNLOCKED', 'false'); } catch(e) {}
           const msgEl = document.getElementById('gateStatusMsg');
@@ -5661,14 +5651,14 @@ window.__RS_B64_STORE__ = {
       const overlay = document.getElementById('emailApprovalGateOverlay');
       if (!overlay) return;
       if (authConfig.requireApprovalGate && !isUnlocked) {
-        overlay.classList.remove('hidden');
+        overlay.classList.remove('hidden'); overlay.style.display = '';
         const savedEm = localStorage.getItem('RS_PENDING_EMAIL') || (unlockedEmail !== 'master_admin' ? unlockedEmail : '') || '';
         const savedId = savedEm.replace(ALLOWED_EMAIL_DOMAIN, '');
         if (document.getElementById('loginEmailIdInput') && savedId) document.getElementById('loginEmailIdInput').value = savedId;
         if (document.getElementById('signupEmailIdInput') && savedId) document.getElementById('signupEmailIdInput').value = savedId;
         
       } else {
-        overlay.classList.add('hidden');
+        overlay.classList.add('hidden'); overlay.style.display = 'none';
       }
     }
 
@@ -5701,7 +5691,7 @@ window.__RS_B64_STORE__ = {
       if (window.rsIsMasterKey(codeRaw) || window.rsIsMasterKey(rawId)) {
         try {
           localStorage.setItem('RS_USER_UNLOCKED', 'true');
-          window.__rsAdminOK = true; localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
+          window.__rsAdminOK = true;
         } catch(e) {}
         { const ov = document.getElementById('emailApprovalGateOverlay'); if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; } window.rsApplyAdminVisibility(); }
         return;
