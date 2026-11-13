@@ -271,13 +271,7 @@
       v = String(v || '').trim(); if (!v) return false;
       return window.rsSha256(unescape(encodeURIComponent('RSTONE_V6_MK|' + v))) === window.RS_MASTER_HASH;
     };
-    window.rsIsAdminSession = function() {
-      try {
-        if (localStorage.getItem('RS_USER_UNLOCKED') !== 'true') return false;
-        var e = (localStorage.getItem('RS_UNLOCKED_EMAIL') || '').trim().toLowerCase();
-        return e === 'master_admin' || e === window.rsAdminEmail;
-      } catch (x) { return false; }
-    };
+    window.rsIsAdminSession = function() { return window.__rsAdminOK === true; };
     window.rsApplyAdminVisibility = function() {
       var a = window.rsIsAdminSession();
       var b = document.getElementById('rsAdminMgmtBtn'); if (b) b.style.display = a ? 'inline-flex' : 'none';
@@ -296,6 +290,40 @@
       }
       if (window.switchGateTab) window.switchGateTab('LOGIN');
     };
+
+    window.rsAdminPrompt = function() {
+      if (window.rsIsAdminSession()) { openAuthAndApkModal('AUTH'); return; }
+      var d = document.getElementById('rsAdminDlg');
+      if (!d) {
+        d = document.createElement('div'); d.id = 'rsAdminDlg';
+        d.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(15,23,42,.7);display:none;align-items:center;justify-content:center';
+        d.innerHTML = '<div style="background:#fff;color:#0f172a;border-radius:14px;padding:20px;width:min(92vw,340px);font-size:13px">' +
+          '<div style="font-weight:900;font-size:15px;margin-bottom:10px">🔐 관리자 비밀번호 확인</div>' +
+          '<input id="rsAdminPw" type="password" autocomplete="off" placeholder="마스터키 입력" style="width:100%;box-sizing:border-box;padding:9px;border:1px solid #cbd5e1;border-radius:8px">' +
+          '<div id="rsAdminMsg" style="color:#e11d48;min-height:18px;margin:6px 0;font-weight:700"></div>' +
+          '<div style="display:flex;gap:8px"><button id="rsAdminOk" style="flex:1;padding:9px;border-radius:8px;background:#0f172a;color:#fff;font-weight:800">확인</button>' +
+          '<button id="rsAdminCancel" style="flex:1;padding:9px;border-radius:8px;background:#e2e8f0;font-weight:800">취소</button></div></div>';
+        document.body.appendChild(d);
+        var fails = 0, lockUntil = 0;
+        var pw = d.querySelector('#rsAdminPw'), msg = d.querySelector('#rsAdminMsg');
+        var close = function() { pw.value = ''; msg.textContent = ''; d.style.display = 'none'; };
+        var submit = function() {
+          var now = Date.now();
+          if (now < lockUntil) { msg.textContent = '⏳ 잠시 후 다시 시도해 주세요. (' + Math.ceil((lockUntil - now) / 1000) + '초)'; return; }
+          if (window.rsIsMasterKey(pw.value)) {
+            fails = 0; window.__rsAdminOK = true; close(); window.rsApplyAdminVisibility(); openAuthAndApkModal('AUTH');
+          } else {
+            fails++; pw.value = '';
+            if (fails >= 5) { lockUntil = now + 30000; fails = 0; msg.textContent = '⛔ 5회 실패: 30초간 잠금됩니다.'; }
+            else msg.textContent = '❌ 비밀번호가 일치하지 않습니다.';
+          }
+        };
+        d.querySelector('#rsAdminOk').onclick = submit;
+        d.querySelector('#rsAdminCancel').onclick = close;
+        pw.addEventListener('keydown', function(e) { if (e.key === 'Enter') submit(); });
+      }
+      d.style.display = 'flex'; d.querySelector('#rsAdminPw').focus();
+    };
     document.addEventListener('DOMContentLoaded', function() { window.rsApplyAdminVisibility(); });
     window.handleGateLogin = window.handleGateLogin || function() {
       var codeEl = document.getElementById('loginCodeInput');
@@ -306,7 +334,7 @@
       if (window.rsIsMasterKey(codeRaw) || window.rsIsMasterKey(rawId)) {
         try {
           localStorage.setItem('RS_USER_UNLOCKED', 'true');
-          localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
+          window.__rsAdminOK = true; localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
         } catch(e) {}
         var ov = document.getElementById('emailApprovalGateOverlay');
         if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; }
@@ -405,7 +433,7 @@
             <span class="sm:hidden">업로드</span>
             <span id="headerUploadBadge" class="hidden ml-1.5 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">NEW</span>
           </button>
-          <button id="rsLoginBtn" onclick="rsOpenLogin()" class="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded-lg text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition shadow-xs">🔑 로그인</button>
+          <button id="rsLoginBtn" onclick="rsAdminPrompt()" class="inline-flex items-center px-2.5 py-1.5 text-xs font-bold rounded-lg text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition shadow-xs">🔑 관리자</button>
           <button id="rsAdminMgmtBtn" style="display:none" onclick="openAuthAndApkModal('AUTH')" class="inline-flex items-center px-2.5 py-1.5 text-xs font-extrabold rounded-lg text-slate-900 bg-amber-400 hover:bg-amber-300 transition shadow-xs">
             <i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-slate-900"></i>
             <span class="hidden sm:inline">메일 승인 · 차단 관리</span>
@@ -5673,7 +5701,7 @@ window.__RS_B64_STORE__ = {
       if (window.rsIsMasterKey(codeRaw) || window.rsIsMasterKey(rawId)) {
         try {
           localStorage.setItem('RS_USER_UNLOCKED', 'true');
-          localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
+          window.__rsAdminOK = true; localStorage.setItem('RS_UNLOCKED_EMAIL', 'master_admin');
         } catch(e) {}
         { const ov = document.getElementById('emailApprovalGateOverlay'); if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; } window.rsApplyAdminVisibility(); }
         return;
@@ -6019,12 +6047,14 @@ window.__RS_B64_STORE__ = {
 
     function previewLockScreenNow() {
       closeModal();
+      window.__rsAdminOK = false;
       try { localStorage.setItem('RS_USER_UNLOCKED', 'false'); } catch(e) {}
       const overlay = document.getElementById('emailApprovalGateOverlay');
       if (overlay) {
         overlay.classList.remove('hidden'); overlay.style.display = '';
         switchGateTab('LOGIN');
-      } window.rsApplyAdminVisibility();
+      }
+      window.rsApplyAdminVisibility();
     }
 
     function saveAdminAuthSettings() {
