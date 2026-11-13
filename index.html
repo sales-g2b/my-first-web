@@ -200,30 +200,12 @@
         <button onclick="promptAdminQuickUnlock()" class="hover:text-white underline font-semibold">
           관리자 마스터 로그인 &rarr;
         </button>
-        <button onclick="downloadSelfIndexHtml()" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] shadow-xs">💾 index.html 저장</button>
       </div>
     </div>
   </div>
 
     <script>
     
-    window.downloadSelfIndexHtml = function() {
-      try {
-        var clone = document.documentElement.cloneNode(true);
-        var ov = clone.querySelector('#emailApprovalGateOverlay');
-        if (ov) { ov.classList.add('hidden'); ov.style.display = 'none'; }
-        var fullHtml = '<!DOCTYPE html>' + clone.outerHTML;
-        var blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        a.href = url;
-        a.download = 'index.html';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 2000);
-      } catch(e) {}
-    };
-
     // Early Android-safe Gate Handlers (active immediately before 1.4MB data blocks parse)
     window.switchGateTab = window.switchGateTab || function(mode) {
       var lv = document.getElementById('gateLoginView');
@@ -6183,15 +6165,27 @@ window.__RS_B64_STORE__ = {
     }
 
     function exportLockedDistributionHtml() {
-      let docHtml = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-      const blob = new Blob([docHtml], { type: 'text/html;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'index.html';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const save = (html) => {
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'index.html';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      };
+      if (!window.rsIsAdminSession()) { alert('관리자 로그인 후 이용할 수 있습니다.'); return; }
+      fetch(location.href.split('#')[0], { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error('원본 로드 실패'); return r.text(); })
+        .then(save)
+        .catch(() => {
+          // 원본을 못 가져오면 화면 복사본을 저장하되, 로그인창은 반드시 보이는 상태로 되돌림
+          const clone = document.documentElement.cloneNode(true);
+          const ov = clone.querySelector('#emailApprovalGateOverlay');
+          if (ov) { ov.classList.remove('hidden'); ov.style.display = ''; }
+          const ab = clone.querySelector('#rsAdminMgmtBtn'); if (ab) ab.style.display = 'none';
+          const dlg = clone.querySelector('#rsAdminDlg'); if (dlg) dlg.remove();
+          save('<!DOCTYPE html>\n' + clone.outerHTML);
+        });
     }
 
     // =========================================================================
